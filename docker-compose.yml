@@ -1,0 +1,72 @@
+# LegalMind AI — full stack.   Usage:  docker compose up --build   ->  http://localhost:8080
+name: legalmind-ai
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: legalmind
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-legalmind}
+      POSTGRES_DB: legalmind
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U legalmind -d legalmind"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://legalmind:${POSTGRES_PASSWORD:-legalmind}@postgres:5432/legalmind
+      QDRANT_URL: http://qdrant:6333
+      STORAGE_DIR: /app/data/uploads
+      HF_HOME: /models
+      PRELOAD_MODELS: "true"
+      CORS_ORIGINS: http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173
+    volumes:
+      - uploads:/app/data
+      - models:/models
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"   # API docs at http://localhost:8000/docs (change BACKEND_PORT in .env if 8000 is busy)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    mem_limit: 4g
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"   # change FRONTEND_PORT in .env if 8080 is busy
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 256m
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  uploads:
+  models:
